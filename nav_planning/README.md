@@ -174,8 +174,8 @@ A `room_hanyi` scene at 1.4× scale. Grid spans ~11.5×8.5×11.5 m (574×427×57
 | System | Up Axis | Convention |
 |--------|---------|------------|
 | MuJoCo | z-up | (x=right, y=forward, z=up) |
-| TRUMANS / glTF | y-up | (x=right, y=up, z=forward) |
-| Conversion | — | MuJoCo→TRUMANS: `(-x, z, y)` (det=+1) |
+| TRUMANS / glTF | y-up | (x=left, y=up, z=forward) |
+| Conversion | — | MuJoCo→TRUMANS: `(-x, z, y)` — right-handed (det=+1). Negating x is necessary: a naive `(x, z, y)` swap has det=-1, which mirrors the scene. |
 
 ## Scale Factor
 

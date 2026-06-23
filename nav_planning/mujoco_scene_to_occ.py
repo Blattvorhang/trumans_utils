@@ -36,7 +36,7 @@ def mj_zup_to_trumans_yup(point):
     """Convert a single 3D point: MuJoCo (x, y, z) → TRUMANS (-x, z, y).
 
     MuJoCo uses right-handed z-up:  (x→right, y→forward, z→up).
-    TRUMANS uses right-handed y-up: (x→right, y→up, z→forward).
+    TRUMANS uses right-handed y-up: (x→left, y→up, z→forward).
 
     Simple (x,z,y) swap has det=-1 (reflection). Negating x yields det=+1,
     preserving handedness: R_x(-90°) @ [x, y, z]^T = [x, z, -y]^T."""

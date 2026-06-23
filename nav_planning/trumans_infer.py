@@ -236,7 +236,7 @@ def run_inference(
     transl_out = all_transl[0]  # (T, 3) — TRUMANS y-up
 
     # ---- convert from TRUMANS y-up to MuJoCo z-up ----
-    # y-up (x=right, y=up, z=forward) → z-up (x=right, y=forward, z=up)
+    # y-up (x=left, y=up, z=forward) → z-up (x=right, y=forward, z=up)
     # Point mapping: (x, y, z) → (-x, z, y)  — pure rotation, det=+1
     from scipy.spatial.transform import Rotation as R
 
