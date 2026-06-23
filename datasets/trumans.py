@@ -47,6 +47,8 @@ class TrumansDataset(Dataset):
                     self.object_occ[obj_name] = torch.from_numpy(np.load(os.path.join(self.object_folder, file))).to(device)
 
             for sid, file in enumerate(sorted(os.listdir(self.scene_folder))):
+                if not file.endswith('.npy'):
+                    continue
                 # if scene_name != '' and scene_name not in file:
                 #     continue
                 print(f"{sid} Loading Scene Mesh {file}")
@@ -54,7 +56,7 @@ class TrumansDataset(Dataset):
                 scene_occ = torch.from_numpy(scene_occ).to(device=device, dtype=bool)
                 self.scene_occ.append(scene_occ)
                 self.scene_dict[file] = sid
-            self.scene_occ = torch.stack(self.scene_occ)
+            # scene_occ kept as list — custom scenes may differ in shape
 
             self.scene_grid_np = np.array([-3, 0, -4, 3, 2, 4, 300, 100, 400])
             self.scene_grid_torch = torch.tensor([-3, 0, -4, 3, 2, 4, 300, 100, 400]).to(device)
@@ -112,7 +114,7 @@ class TrumansDataset(Dataset):
         in_bound = torch.logical_and(lb, ub)
         voxel[torch.logical_not(in_bound)] = 0
         voxel = torch.cat([self.batch_id, voxel], dim=1)
-        occ = self.scene_occ[scene_flag]
+        occ = self.scene_occ[scene_flag[0]].unsqueeze(0)  # restore batch dim
 
         #TODO
 
