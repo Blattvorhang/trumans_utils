@@ -77,6 +77,17 @@ The application will be available at `http://127.0.0.1:5000`.
 3. Draw a trajectory within the scene.
 4. The application will synthesize human motion based on the drawn trajectory and display it within the scene.
 
+# G1 Humanoid Motion Pipeline (`nav_planning/`)
+
+The [`nav_planning/`](nav_planning/) folder provides a complete pipeline for generating humanoid motions from MuJoCo scenes, designed for Unitree G1 robot baseline testing. See the [nav_planning README](nav_planning/README.md) for full documentation.
+
+- **`mujoco_scene_to_occ.py`** — MuJoCo XML → TRUMANS voxel occupancy grid (.npy)
+- **`mujoco_scene_to_glb.py`** — MuJoCo XML → simplified GLB mesh for visualization
+- **`path_planner.py`** — Linear or A\* path planning on voxel grids
+- **`trumans_infer.py`** — Start/Goal → TRUMANS diffusion → SMPL motion (.npz)
+- **`grid_search.py`** — Batch grid search over scale factors
+- **`app_playback.py`** — Flask 3D web visualization of generated motions
+
 # Training
 ## Overview
 
