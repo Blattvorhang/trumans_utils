@@ -81,6 +81,8 @@ def run_inference(
     planner="linear",
     clearance=0.25,
     height_range=(0.6, 0.8),
+    history_path=None,
+    init_fdir=None,
 ):
     """Load models, run TRUMANS inference, save SMPL-H .npz."""
 
@@ -209,9 +211,35 @@ def run_inference(
     )
     print(f"[trumans_infer] Diffusion steps: {len(goal_list)}")
 
-    points_all = sample_step(
-        cfg, mat, obj_locs, goal_list, action_label_list, sampler_list
+    # ---- load and adapt autoregressive state for seamless replanning ----
+    fixed_points_init = None
+    if history_path is not None and os.path.exists(history_path):
+        from nav_planning.replan_state import load_state, adapt_state
+        prev_state = load_state(history_path)
+        heading = init_fdir if init_fdir is not None else (0.0, 1.0)
+        adapted = adapt_state(prev_state, (float(start[0]), float(start[1])), heading)
+        fixed_points_init = torch.from_numpy(adapted.fixed_points).float().to(device)
+        # Override mat with the adapted transform so the generation frame
+        # matches the rigidly-transformed history buffer.
+        mat = torch.from_numpy(adapted.mat).float().to(device)
+        print(f"[trumans_infer] Loaded state, adapted: start={start}, heading={heading}")
+    else:
+        print("[trumans_infer] Cold start (no history)")
+
+    points_all, final_mat, final_fixed_points = sample_step(
+        cfg, mat, obj_locs, goal_list, action_label_list, sampler_list,
+        fixed_points_init=fixed_points_init,
     )
+
+    # ---- save state for next replan cycle ----
+    from nav_planning.replan_state import GenerationState, save_state as save_gs
+    base_out, _ext = os.path.splitext(output_path)
+    state_path = f"{base_out}_state.npz"
+    save_gs(GenerationState(
+        mat=final_mat.cpu().numpy().astype(np.float32),
+        fixed_points=final_fixed_points.cpu().numpy().astype(np.float32),
+    ), state_path)
+    print(f"[trumans_infer] Saved state → {state_path}")
 
     # ---- convert to SMPL params ----
     all_poses = []

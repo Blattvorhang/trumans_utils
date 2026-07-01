@@ -146,9 +146,10 @@ def get_guidance(cfg, trajectory, samplers, act_type='none', speed=35):
     return mat_init, goal_list, action_label_list, sampler_list
 
 
-def sample_step(cfg, mat, obj_locs, goal_list, action_label_list, sampler_list):
+def sample_step(cfg, mat, obj_locs, goal_list, action_label_list, sampler_list,
+                fixed_points_init=None):
     max_step = len(goal_list)
-    fixed_points = None
+    fixed_points = fixed_points_init
     fixed_frame = 2
     points_all = []
     cnt_fixed_frame = 0
@@ -210,7 +211,7 @@ def sample_step(cfg, mat, obj_locs, goal_list, action_label_list, sampler_list):
     points_all = np.concatenate(points_all, axis=1)
     points_all = points_all[:, cnt_seq_len - cnt_fixed_frame:]
 
-    return points_all
+    return points_all, mat, fixed_points
 
 
 def sample_wrapper(trajectory, obj_locs):
@@ -270,7 +271,7 @@ def sample_wrapper(trajectory, obj_locs):
 
     mat, goal_list, action_label_list, sampler_list = get_guidance(cfg, trajectory, samplers, act_type=cfg.action_type,
                                                                    speed=int(0.6 * base_speed))
-    points_all = sample_step(cfg, mat, obj_locs, goal_list, action_label_list, sampler_list)
+    points_all, _, _ = sample_step(cfg, mat, obj_locs, goal_list, action_label_list, sampler_list)
 
     # os.makedirs(cfg.exp_dir, exist_ok=True)
     vertices = None

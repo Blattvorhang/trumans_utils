@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRUMANS Motion Playback</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: monospace; }
+  #panel {
+    position: absolute; top: 10px; left: 10px; z-index: 10;
+    background: rgba(0,0,0,0.8); color: #fff; padding: 12px;
+    border-radius: 6px; max-width: 320px;
+  }
+  #panel select, #panel button, #panel input {
+    display: block; width: 100%; margin: 4px 0; padding: 6px;
+    font-size: 13px;
+  }
+  #info { position: absolute; bottom: 10px; left: 10px; color: #fff;
+          background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <label>Scene GLB:</label>
+  <select id="sceneSelect"></select>
+  <label>Motion .npz:</label>
+  <select id="motionSelect"></select>
+  <button id="loadBtn">Load & Play</button>
+  <hr>
+  <label>Frame:</label>
+  <input type="range" id="frameSlider" min="0" max="100" value="0">
+  <button id="playBtn">Play</button>
+  <button id="pauseBtn">Pause</button>
+  <span id="frameLabel" style="color:#aaa">0 / 0</span>
+</div>
+<div id="info">TRUMANS Motion Playback</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x222222);
+scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(5, 10, 5);
+scene.add(dirLight);
+const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x3f3f3f, 0.6);
+scene.add(hemiLight);
+scene.add(new THREE.GridHelper(10, 20));
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.set(5, 8, 5);
+camera.lookAt(0, 0.5, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+
+// Point cloud for SMPL body
+let pointCloud = null;
+let motionData = null;
+let currentFrame = 0;
+let playing = false;
+let gltfScene = null;
+const gltfLoader = new GLTFLoader();
+
+const dummyGeo = new THREE.BufferGeometry();
+dummyGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+const material = new THREE.PointsMaterial({size: 0.03, color: 0x4080ff});
+pointCloud = new THREE.Points(dummyGeo, material);
+scene.add(pointCloud);
+
+// ---- UI bindings ----
+const sceneSelect = document.getElementById('sceneSelect');
+const motionSelect = document.getElementById('motionSelect');
+const frameSlider = document.getElementById('frameSlider');
+const frameLabel = document.getElementById('frameLabel');
+
+async function loadScenes() {
+  const res = await fetch('/api/scenes');
+  const scenes = await res.json();
+  scenes.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.path;
+    opt.text = s.name;
+    sceneSelect.appendChild(opt);
+  });
+}
+
+async function loadMotions() {
+  const res = await fetch('/api/motions');
+  const motions = await res.json();
+  motions.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.path;
+    opt.text = m.name;
+    motionSelect.appendChild(opt);
+  });
+}
+
+document.getElementById('loadBtn').addEventListener('click', async () => {
+  // Remove old GLB scene (with full disposal)
+  if (gltfScene) {
+    scene.remove(gltfScene);
+    gltfScene.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => m.dispose());
+        } else {
+          obj.material.dispose();
+        }
+      }
+    });
+    gltfScene = null;
+  }
+
+  // Load scene GLB
+  const glbPath = sceneSelect.value;
+  if (glbPath) {
+    try {
+      const gltf = await gltfLoader.loadAsync(glbPath);
+      gltfScene = gltf.scene;
+      scene.add(gltfScene);
+    } catch(e) {
+      console.warn('GLB load failed:', e);
+    }
+  }
+
+  // Load motion
+  const npzPath = motionSelect.value;
+  const info = document.getElementById('info');
+  info.textContent = 'Loading motion...';
+  const res = await fetch('/api/load_motion', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({npz_path: npzPath})
+  });
+  const result = await res.json();
+  if (result.error) {
+    info.textContent = 'Error: ' + result.error;
+    return;
+  }
+  motionData = result.data;
+  frameSlider.max = motionData.length - 1;
+  frameSlider.value = 0;
+  currentFrame = 0;
+
+  // Auto-render path if included
+  if (result.path && result.path.length >= 2) {
+    updatePathLine(result.path);
+    const p0 = result.path[0], pN = result.path[result.path.length - 1];
+    updateMarkers(p0[0], p0[2], pN[0], pN[2]);
+    info.textContent = `Loaded ${motionData.length} frames, ${result.vertices_per_frame} verts (${result.planner})`;
+  } else {
+    info.textContent = `Loaded ${motionData.length} frames, ${result.vertices_per_frame} verts`;
+  }
+  updateFrame();
+});
+
+document.getElementById('playBtn').addEventListener('click', () => { playing = true; });
+document.getElementById('pauseBtn').addEventListener('click', () => { playing = false; });
+frameSlider.addEventListener('input', () => {
+  currentFrame = parseInt(frameSlider.value);
+  updateFrame();
+});
+
+function updateFrame() {
+  if (!motionData) return;
+  const frame = motionData[currentFrame];
+  if (!pointCloud.geometry || pointCloud.geometry.attributes.position.count !== frame.length) {
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(frame.length * 3);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (pointCloud.geometry) pointCloud.geometry.dispose();
+    pointCloud.geometry = geometry;
+  }
+  const pos = pointCloud.geometry.attributes.position.array;
+  for (let i = 0, j = 0; i < frame.length; i++, j += 3) {
+    pos[j] = frame[i][0];
+    pos[j+1] = frame[i][1];
+    pos[j+2] = frame[i][2];
+  }
+  pointCloud.geometry.attributes.position.needsUpdate = true;
+  frameSlider.value = currentFrame;
+  frameLabel.textContent = `${currentFrame + 1} / ${motionData.length}`;
+}
+
+// ---- Path line rendering ----
+let pathLine = null;
+let startMarker = null;
+let goalMarker = null;
+
+function updatePathLine(waypoints) {
+  if (pathLine) {
+    scene.remove(pathLine);
+    pathLine.geometry.dispose();
+    pathLine.material.dispose();
+    pathLine = null;
+  }
+  if (!waypoints || waypoints.length < 2) return;
+
+  const positions = new Float32Array(waypoints.length * 3);
+  for (let i = 0; i < waypoints.length; i++) {
+    positions[i * 3] = waypoints[i][0];
+    positions[i * 3 + 1] = waypoints[i][1];
+    positions[i * 3 + 2] = waypoints[i][2];
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.LineBasicMaterial({ color: 0x0000ff });
+  pathLine = new THREE.Line(geometry, material);
+  scene.add(pathLine);
+}
+
+function updateMarkers(sx, sz, gx, gz) {
+  if (startMarker) scene.remove(startMarker);
+  if (goalMarker) scene.remove(goalMarker);
+
+  const sphereGeo = new THREE.SphereGeometry(0.08, 16, 16);
+  const startMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+  const goalMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+  startMarker = new THREE.Mesh(sphereGeo, startMat);
+  startMarker.position.set(sx, 0.1, sz);
+  scene.add(startMarker);
+
+  goalMarker = new THREE.Mesh(sphereGeo, goalMat);
+  goalMarker.position.set(gx, 0.1, gz);
+  scene.add(goalMarker);
+}
+
+let lastFrameTime = 0;
+const TARGET_FPS = 30;
+const FRAME_INTERVAL = 1000 / TARGET_FPS;
+
+function animate(timestamp) {
+  requestAnimationFrame(animate);
+  if (playing && motionData && timestamp - lastFrameTime >= FRAME_INTERVAL) {
+    lastFrameTime = timestamp;
+    currentFrame = (currentFrame + 1) % motionData.length;
+    updateFrame();
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+loadScenes();
+loadMotions();
+animate();
+</script>
+</body>
+</html>
